@@ -126,6 +126,7 @@ const handleSaveTextData = () => {
   const [exportImages, setExportImages] = useState<string[]>(Array(3).fill(""));
   const [isLoaded, setIsLoaded] = useState(false);
   const [referenceUploading, setReferenceUploading] = useState(false);
+  const [selectedReferenceImage, setSelectedReferenceImage] = useState<string | null>(null);
   const referenceInputRef = useRef<HTMLInputElement | null>(null);
 
 useEffect(() => {
@@ -419,7 +420,8 @@ useEffect(() => {
                 <img
                   src={referenceImage}
                   alt="Reference"
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover cursor-pointer"
+                  onClick={() => setSelectedReferenceImage(referenceImage)}
                 />
               ) : (
                 <div className="text-zinc-500 px-4 text-center">
@@ -488,6 +490,22 @@ useEffect(() => {
             </div>
           </div>
         </div>
+
+        {selectedReferenceImage && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-6">
+            <button
+              onClick={() => setSelectedReferenceImage(null)}
+              className="absolute top-6 right-6 text-white text-3xl"
+            >
+              ✕
+            </button>
+            <img
+              src={selectedReferenceImage}
+              alt="Reference zoom"
+              className="max-w-full max-h-full rounded-2xl shadow-2xl"
+            />
+          </div>
+        )}
 
         {/* --- GEOMETRY CHECKLIST --- */}
         <ChecklistSection
@@ -961,7 +979,8 @@ function ChecklistItem({
                       <img
                         src={imageUrl}
                         alt="Checklist upload"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover cursor-pointer"
+                        onClick={() => setSelectedImage(imageUrl)}
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-xs text-zinc-500">
