@@ -541,7 +541,7 @@ const mainColumns = useMemo(() => {
                   <h4 className="font-black text-base text-zinc-100 leading-snug">{task.title}</h4>
                 </div>
 
-                {/* DROPDOWN SELECT MODELER */}
+                {/* DROPDOWN SELECT MODELER  */}
                 <div className="border-t border-zinc-800/80 pt-4 flex items-center justify-between gap-3">
                   <span className="text-xs font-bold text-zinc-400">Tugaskan ke:</span>
                   <select
