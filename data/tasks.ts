@@ -15,6 +15,8 @@ export type Task = {
 
   // --- Properti Sinkronisasi Spreadsheet ---
   status: string; 
+  progress?: number;
+  archived?: boolean;
   lat?: number | null;
   lon?: number | null;
   height?: number | null;
@@ -25,8 +27,8 @@ export type Columns = {
   [key: string]: Task[];
 };
 
-// URL API Google Apps Script Web App kamu
-export const SPREADSHEET_API_URL = "https://script.google.com/macros/s/AKfycbxmxpojeor2QCX2yWY02gZnHEg7KTa9r7JbItRIMTMevMqWC-kH-fRZpeZLlEgPTgsq3g/exec";
+// Local proxy route that forwards requests to Google Apps Script
+export const SPREADSHEET_API_URL = "/api";
 
 // Menggunakan 6 kolom spesifik alur kerja software
 export const initialColumns: Columns = {

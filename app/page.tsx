@@ -5,26 +5,10 @@ import TaskModal from "@/components/TaskModal";
 import { Task, Columns, initialColumns, SPREADSHEET_API_URL } from "@/data/tasks";
 
 export default function Home() {
-  const [archivedIds, setArchivedIds] = useState<string[]>([]);
-
-useEffect(() => {
-  const saved = localStorage.getItem("my_local_archive");
-  if (saved) setArchivedIds(JSON.parse(saved));
-}, []);
-
-// Fungsi untuk mengarsipkan secara lokal
-const archiveTaskLocally = (id: string) => {
-  const newIds = [...archivedIds, id];
-  setArchivedIds(newIds);
-  localStorage.setItem("my_local_archive", JSON.stringify(newIds));
-};
-const unarchiveTaskLocally = (id: string) => {
-  const newIds = archivedIds.filter((item) => item !== id);
-  setArchivedIds(newIds);
-  localStorage.setItem("my_local_archive", JSON.stringify(newIds));
-};
+  const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
   const [columns, setColumns] = useState<Columns>(initialColumns);
   const [unassignedTasks, setUnassignedTasks] = useState<Task[]>([]);
+  const [taskProgressMap, setTaskProgressMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
@@ -39,14 +23,14 @@ const unarchiveTaskLocally = (id: string) => {
   const [searchUnassigned, setSearchUnassigned] = useState<string>("");
   const [searchArchive, setSearchArchive] = useState<string>("");
 
-  // Daftar master nama modeler yang bisa ditambah sebanyak mungkin ke depannya
-  const masterModelers = [
-  "Agnn", "Ajeng", "Aldi", "Alif", "Andrei", "Arkan", "Aini", 
-  "Budi", "Chandra", "Dewi", "Eko", "Eulia", "Faishal", "Fakhri", 
-  "Lutfhi", "Malika", "Miko", "Naila", "Nanda", "Nandito", "Nando", 
-  "Raihan", "Rizky", "Saka", "Salsa", "SMK", "Sadewa", "Syahid", 
-  "Tiara", "Yudha", "Yudis"
-].sort(); //
+  const [modelers, setModelers] = useState<string[]>([]);
+  const defaultModelers = [
+    "Agnn", "Ajeng", "Aldi", "Alif", "Andrei", "Arkan", "Aini",
+    "Budi", "Chandra", "Dewi", "Eko", "Eulia", "Faishal", "Fakhri",
+    "Lutfhi", "Malika", "Miko", "Naila", "Nanda", "Nandito", "Nando",
+    "Raihan", "Rizky", "Saka", "Salsa", "SMK", "Sadewa", "Syahid",
+    "Tiara", "Yudha", "Yudis"
+  ];
 
   // --- AMBIL DATA DARI SPREADSHEET (GET) ---
   const fetchSpreadsheetData = async () => {
@@ -57,7 +41,13 @@ const unarchiveTaskLocally = (id: string) => {
       const response = await fetch(SPREADSHEET_API_URL, { method: "GET" });
       if (!response.ok) throw new Error(`HTTP Error! Status: ${response.status}`);
 
-      const rawTasks = await response.json();
+      const responseBody = await response.json();
+      const rawTasks = Array.isArray(responseBody) ? responseBody : responseBody.tasks ?? [];
+      const apiModelers: string[] = !Array.isArray(responseBody) && Array.isArray(responseBody.modelerOptions)
+        ? responseBody.modelerOptions
+            .filter((item: unknown): item is string => typeof item === "string")
+            .map((item: string) => item.trim())
+        : [];
 
       if (Array.isArray(rawTasks)) {
         const updatedColumns: Columns = {
@@ -70,11 +60,16 @@ const unarchiveTaskLocally = (id: string) => {
         };
         const unassignedList: Task[] = [];
 
+        const archivedList: Task[] = [];
+
         rawTasks.forEach((taskFromSheet: any) => {
           const currentStatus = (taskFromSheet.status || "Todo").trim();
           const upperStatus = currentStatus.toUpperCase();
           const assignedModeler = (taskFromSheet.assignedTo || "—").trim();
+          const isArchived = taskFromSheet.archived === true || String(taskFromSheet.archived || "").toLowerCase() === "true";
 
+          const rawProgress = String(taskFromSheet.progress ?? taskFromSheet.progressValue ?? "").replace(/[^0-9.-]+/g, "");
+          const parsedProgress = rawProgress === "" ? NaN : Number(rawProgress);
           const formattedTask: Task = {
             id: taskFromSheet.id ? String(taskFromSheet.id) : String(Math.random()),
             title: taskFromSheet.title || "No Name",
@@ -87,11 +82,18 @@ const unarchiveTaskLocally = (id: string) => {
             nameJoin: taskFromSheet.nameJoin || "—",
             notes: taskFromSheet.notes || "",
             image: taskFromSheet.image || "",
-            status: currentStatus, 
+            status: currentStatus,
+            progress: Number.isNaN(parsedProgress) ? undefined : Math.min(100, Math.max(0, parsedProgress)),
+            archived: isArchived,
             lat: taskFromSheet.lat || null,
             lon: taskFromSheet.lon || null,
             height: taskFromSheet.height || null,
           };
+
+          if (isArchived) {
+            archivedList.push(formattedTask);
+            return;
+          }
 
           // Jika status Todo/Kosong DAN belum di-assign, masuk ke Pool Unassigned
           if ((upperStatus === "TODO" || upperStatus === "") && (assignedModeler === "" || assignedModeler === "—")) {
@@ -115,6 +117,23 @@ const unarchiveTaskLocally = (id: string) => {
 
         setColumns(updatedColumns);
         setUnassignedTasks(unassignedList);
+        setArchivedTasks(archivedList);
+
+        if (apiModelers.length > 0) {
+          setModelers([...new Set(apiModelers.map((m: any) => m?.toString().trim()).filter((m: string) => !!m))].sort((a, b) => a.localeCompare(b)));
+        } else {
+          const modelerNames = new Set<string>();
+          rawTasks.forEach((taskFromSheet: any) => {
+            const assigned = (taskFromSheet.assignedTo || "").trim();
+            if (assigned && assigned !== "—") modelerNames.add(assigned);
+
+            const fallback = (taskFromSheet.pjModeler || taskFromSheet.modeler || taskFromSheet.PJModeler || "").trim();
+            if (fallback && fallback !== "—") modelerNames.add(fallback);
+          });
+
+          const sortedModelers = [...modelerNames].sort((a, b) => a.localeCompare(b));
+          setModelers(sortedModelers.length > 0 ? sortedModelers : [...defaultModelers].sort((a, b) => a.localeCompare(b)));
+        }
       }
     } catch (error: any) {
       setErrorMessage(error.message || "Gagal mengambil data dari Spreadsheet.");
@@ -160,15 +179,23 @@ const unarchiveTaskLocally = (id: string) => {
     }
 
     try {
-      await fetch(SPREADSHEET_API_URL, {
+      const updatedStatus = isUnassigning ? "Todo" : (task.status || "Todo");
+      const response = await fetch(SPREADSHEET_API_URL, {
         method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        headers: { "Content-Type": "application/json;charset=utf-8" },
         body: JSON.stringify({
+          id: task.id,
           bdgId: task.bdgId,
           assignedTo: targetModeler,
-          status: isUnassigning ? "Todo" : task.status
+          status: updatedStatus
         }),
       });
+
+      if (!response.ok) {
+        throw new Error(`Update modeler failed: ${response.status}`);
+      }
+
+      await fetchSpreadsheetData();
     } catch (err) {
       console.error("Gagal sinkronisasi update modeler:", err);
     }
@@ -210,29 +237,126 @@ const unarchiveTaskLocally = (id: string) => {
     setDraggedTask(null);
   }
 
+  const moveTaskToArchiveState = (task: Task) => {
+    setColumns((prev) => {
+      const updated = Object.fromEntries(
+        Object.entries(prev).map(([key, tasks]) => [key, tasks.filter((t) => t.id !== task.id)])
+      ) as Columns;
+      return updated;
+    });
+    setArchivedTasks((prev) => [task, ...prev.filter((t) => t.id !== task.id)]);
+  };
+
+  const restoreTaskFromState = (task: Task) => {
+    setArchivedTasks((prev) => prev.filter((t) => t.id !== task.id));
+  };
+
+  async function archiveTask(task: Task) {
+    try {
+      const response = await fetch(SPREADSHEET_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json;charset=utf-8" },
+        body: JSON.stringify({ id: task.id, bdgId: task.bdgId, archived: true }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Archive failed: ${response.status}`);
+      }
+
+      moveTaskToArchiveState(task);
+    } catch (err) {
+      console.error("Gagal arsipkan tugas:", err);
+      fetchSpreadsheetData();
+    }
+  }
+
+  async function restoreTask(task: Task) {
+    try {
+      const response = await fetch(SPREADSHEET_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json;charset=utf-8" },
+        body: JSON.stringify({ id: task.id, bdgId: task.bdgId, archived: false }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Restore failed: ${response.status}`);
+      }
+
+      restoreTaskFromState(task);
+      fetchSpreadsheetData();
+    } catch (err) {
+      console.error("Gagal kembalikan dari arsip:", err);
+      fetchSpreadsheetData();
+    }
+  }
+
   const activeUsersFilter = useMemo(() => {
     const allUsers = Object.values(columns).flat().map((t) => t.assignedTo);
     return ["All", ...new Set(allUsers.filter(u => u !== "—"))];
   }, [columns]);
 
-const mainColumns = useMemo(() => {
-  const filterOutArchived = (tasks: Task[]) =>
-    tasks.filter((t) => !archivedIds.includes(t.id));
+  const computeChecklistProgress = (savedData: any) => {
+    if (!savedData || typeof savedData !== "object") return undefined;
 
-  return {
-    TODO: filterOutArchived(columns.TODO),
-    WIP_BLENDER: filterOutArchived(columns.WIP_BLENDER),
-    WIP_REVIT: filterOutArchived(columns.WIP_REVIT),
-    REVIEW: filterOutArchived(columns.REVIEW),
-    DONE_BLENDER: filterOutArchived(columns.DONE_BLENDER).slice(-6),
-    DONE_REVIT: filterOutArchived(columns.DONE_REVIT).slice(-6),
+    const geometry = Array.isArray(savedData.geometryChecks) ? savedData.geometryChecks.filter(Boolean).length : 0;
+    const object = Array.isArray(savedData.objectChecks) ? savedData.objectChecks.filter(Boolean).length : 0;
+    const texture = Array.isArray(savedData.textureChecks) ? savedData.textureChecks.filter(Boolean).length : 0;
+    const export_ = Array.isArray(savedData.exportChecks) ? savedData.exportChecks.filter(Boolean).length : 0;
+
+    const totalChecked = geometry + object + texture + export_;
+    const totalChecklist = 16;
+    return totalChecklist > 0 ? Math.round((totalChecked / totalChecklist) * 100) : undefined;
   };
-}, [columns, archivedIds]);
 
-const archivedTasks = useMemo(() => {
-  const allDone = [...columns.DONE_BLENDER, ...columns.DONE_REVIT];
-  return allDone.filter((t) => archivedIds.includes(t.id));
-}, [columns, archivedIds]);
+  useEffect(() => {
+    const loadedProgress: Record<string, number> = {};
+    const allTasks = [...Object.values(columns).flat(), ...archivedTasks];
+
+    allTasks.forEach((task) => {
+      try {
+        const saved = localStorage.getItem(`task_data_${task.id}`);
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        const progress = computeChecklistProgress(parsed);
+        if (typeof progress === "number") {
+          loadedProgress[task.id] = progress;
+        }
+      } catch (error) {
+        // ignore malformed storage
+      }
+    });
+
+    setTaskProgressMap(loadedProgress);
+  }, [columns, archivedTasks]);
+
+  const getTaskProgress = (task: Task) => {
+    const savedProgress = taskProgressMap[task.id];
+    if (typeof savedProgress === "number" && !Number.isNaN(savedProgress)) {
+      return Math.min(100, Math.max(0, savedProgress));
+    }
+
+    if (typeof task.progress === "number" && !Number.isNaN(task.progress)) {
+      return Math.min(100, Math.max(0, task.progress));
+    }
+
+    const status = (task.status || "").toLowerCase();
+    if (status.includes("done")) return 100;
+    if (status.includes("review") || status.includes("qc")) return 80;
+    if (status.includes("wip")) return 50;
+    if (status.includes("todo")) return 20;
+    return 10;
+  };
+
+const mainColumns = useMemo(() => {
+  return {
+    TODO: columns.TODO,
+    WIP_BLENDER: columns.WIP_BLENDER,
+    WIP_REVIT: columns.WIP_REVIT,
+    REVIEW: columns.REVIEW,
+    DONE_BLENDER: columns.DONE_BLENDER.slice(-6),
+    DONE_REVIT: columns.DONE_REVIT.slice(-6),
+  };
+}, [columns]);
 
   const filteredUnassigned = useMemo(() => {
     return unassignedTasks.filter(t => 
@@ -266,25 +390,25 @@ const archivedTasks = useMemo(() => {
       {/* Header Workspace */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-800 w-full">
         <div>
-          <h1 className="text-3xl font-black tracking-tight text-zinc-100">TMT Task Tracker</h1>
-          <p className="text-base text-zinc-400 mt-1">Sistem Distribusi & Manajemen Pekerjaan</p>
+          <h1 className="text-3xl font-black tracking-tight text-zinc-100">MadingHub</h1>
+          <p className="text-base text-zinc-400 mt-1">Digital wall for ideas and tasks.</p>
         </div>
         
         <div className="flex flex-wrap items-center gap-2.5">
           <button 
             onClick={() => setShowUnassignedFull(true)} 
-            className="bg-amber-950/40 hover:bg-amber-900/60 text-amber-400 text-sm px-4 py-2 rounded-lg border border-amber-800/80 font-black transition-all flex items-center gap-2"
+            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm px-4 py-2 rounded-lg border border-zinc-700 font-black transition-all flex items-center gap-2"
           >
             📋 Pool Unassigned 
-            <span className="bg-amber-500 text-zinc-950 text-xs px-1.5 py-0.5 rounded-md font-black">{unassignedTasks.length}</span>
+            <span className="bg-zinc-700 text-zinc-200 text-xs px-1.5 py-0.5 rounded-md font-black">{unassignedTasks.length}</span>
           </button>
 
           <button 
             onClick={() => setShowArchiveFull(true)} 
-            className="bg-amber-950/40 hover:bg-amber-900/60 text-amber-400 text-sm px-4 py-2 rounded-lg border border-amber-800/80 font-black transition-all flex items-center gap-2"
+            className="bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 text-sm px-4 py-2 rounded-lg border border-emerald-800/80 font-black transition-all flex items-center gap-2"
           >
             📦 Arsip Done
-            <span className="bg-amber-500 text-zinc-950 text-xs px-1.5 py-0.5 rounded-md font-black">{unassignedTasks.length}</span>
+            <span className="bg-emerald-500 text-zinc-950 text-xs px-1.5 py-0.5 rounded-md font-black">{archivedTasks.length}</span>
           </button>
 
           <div className="h-6 w-[1px] bg-zinc-800 mx-1 hidden sm:block"></div>
@@ -309,7 +433,7 @@ const archivedTasks = useMemo(() => {
           const isRevitCol = columnName.includes("REVIT");
           
           let headerColor = "text-zinc-400";
-          if (isBlenderCol) headerColor = "text-emerald-400";
+          if (isBlenderCol) headerColor = "text-orange-300";
           if (isRevitCol) headerColor = "text-sky-400";
 
           return (
@@ -322,42 +446,51 @@ const archivedTasks = useMemo(() => {
               <div className="space-y-4 flex-1 overflow-y-auto max-h-[75vh] pr-0.5 custom-scrollbar">
                 {filteredTasks.map((task) => (
                   <div key={task.id} draggable onDragStart={() => handleDragStart(task, columnName)} onClick={() => setSelectedTask(task)} className="bg-zinc-800 hover:bg-zinc-750/90 rounded-xl p-4.5 cursor-grab active:cursor-grabbing border border-zinc-700/70 shadow-md transition-all group">
-                    <div className="flex gap-2 mb-3" onClick={(e) => e.stopPropagation()}>
-                      <span className={`px-2.5 py-0.5 text-[11px] font-black uppercase tracking-wider rounded ${isBlenderCol ? "bg-emerald-950 text-emerald-400 border border-emerald-900/50" : isRevitCol ? "bg-sky-950 text-sky-400 border border-sky-900/50" : "bg-zinc-900 text-zinc-400 border border-zinc-800"}`}>{isBlenderCol ? "Blender" : isRevitCol ? "Revit" : "General"}</span>
+                    <div className="flex items-center justify-between gap-3 mb-3" onClick={(e) => e.stopPropagation()}>
+                      <span className={`px-2.5 py-1 text-[11px] font-black uppercase tracking-wider rounded ${isBlenderCol ? "bg-orange-900/20 text-orange-300 border border-orange-700/50" : isRevitCol ? "bg-sky-950 text-sky-400 border border-sky-900/50" : "bg-zinc-900 text-zinc-400 border border-zinc-800"}`}>{isBlenderCol ? "Blender" : isRevitCol ? "Revit" : "General"}</span>
+                      <div className="w-full max-w-[160px] text-right">
+                        <div className="h-2 rounded-full bg-zinc-900 overflow-hidden border border-zinc-700">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-700 transition-all"
+                            style={{ width: `${getTaskProgress(task)}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
-                    
+
                     <h3 className="font-black text-base text-zinc-100 mb-4 leading-snug group-hover:text-white transition-colors">{task.title}</h3>
                     
                     <div className="space-y-3.5 text-sm font-bold text-zinc-300 border-t border-zinc-700/60 pt-3.5" onClick={(e) => e.stopPropagation()}>
-                    {(columnName === "DONE_BLENDER" || columnName === "DONE_REVIT") && (
-  <button
-    onClick={(e) => {
-      e.stopPropagation();
-      archiveTaskLocally(task.id);
-    }}
-    className="mt-3 w-full bg-zinc-800 hover:bg-orange-700 text-zinc-400 hover:text-white text-xs font-bold py-1.5 rounded border border-zinc-700 transition"
-  >
-    ↙ Move to Archive
-  </button>
-)}
-                      <div className="flex justify-between items-center"><span className="text-zinc-500 font-bold">Level:</span><span className="bg-zinc-900 text-zinc-100 px-2 py-0.5 rounded text-[12px] font-black font-mono border border-zinc-750">{task.level || "—"}</span></div>
-                      
-                      {/* FITUR BARU: Dropdown Modeler Langsung Di Board Utama untuk Re-assign & Unassign */}
-                      <div className="flex justify-between items-center gap-2">
-                        <span className="text-zinc-500 font-bold">Modeler:</span>
+                      {(columnName === "DONE_BLENDER" || columnName === "DONE_REVIT") && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            archiveTask(task);
+                          }}
+                          className="mt-3 w-full bg-zinc-800 hover:bg-emerald-600 text-zinc-300 hover:text-white text-xs font-bold py-1.5 rounded border border-zinc-700 transition"
+                        >
+                          ↙ Move to Archive
+                        </button>
+                      )}
+
+                      <div className="mt-3 flex items-center justify-between gap-2 text-xs text-zinc-400">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-zinc-200 font-semibold">{task.level || "—"}</span>
+                          <span>•</span>
+                          <span className={`${task.dueDate !== "—" ? "text-emerald-400" : "text-zinc-600"}`}>{task.dueDate}</span>
+                        </div>
                         <select 
                           value={task.assignedTo || "—"} 
                           onChange={(e) => updateTaskModeler(task, columnName, e.target.value)}
-                          className="bg-zinc-900 border border-zinc-700 text-sky-400 text-[13px] font-black rounded px-2 py-1 max-w-[140px] focus:outline-none focus:border-sky-500"
+                          className="bg-zinc-900 border border-zinc-700 text-sky-400 text-[13px] font-black rounded px-3 py-2 min-w-[120px] focus:outline-none focus:border-sky-500"
                         >
                           <option value="—" className="text-amber-500 font-bold">⚠️ Unassigned</option>
-                          {masterModelers.map((name) => (
+                          {modelers.map((name) => (
                             <option key={name} value={name} className="text-zinc-200">{name}</option>
                           ))}
                         </select>
                       </div>
-
-                      <div className="flex justify-between items-center"><span className="text-zinc-500 font-bold">Due Date:</span><span className={`font-black font-mono text-[13px] ${task.dueDate !== "—" ? "text-emerald-400" : "text-zinc-600"}`}>{task.dueDate}</span></div>
                     </div>
                   </div>
                 ))}
@@ -417,7 +550,7 @@ const archivedTasks = useMemo(() => {
                     className="bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs font-black rounded-lg px-3 py-2 flex-1 focus:outline-none focus:border-amber-500"
                   >
                     <option value="—">— Pilih Modeler —</option>
-                    {masterModelers.map((name) => (
+                    {modelers.map((name) => (
                       <option key={name} value={name}>{name}</option>
                     ))}
                   </select>
@@ -462,18 +595,20 @@ const archivedTasks = useMemo(() => {
               <div key={task.id} className="bg-zinc-900/50 border border-zinc-850 p-4.5 rounded-2xl opacity-80 hover:opacity-100 transition-all">
                 <div className="flex justify-between text-xs font-mono font-bold mb-2">
                   <span className="text-zinc-600">ID: {task.bdgId}</span>
-                  <span className={task.status.toUpperCase().includes("BLENDER") ? "text-emerald-500" : "text-sky-500 font-black"}>{task.status}</span>
+                  <span className={task.status.toUpperCase().includes("BLENDER") ? "text-orange-400" : "text-sky-500 font-black"}>{task.status}</span>
                 </div>
                 <h4 className="font-extrabold text-sm text-zinc-200 line-clamp-2 mb-3">{task.title}</h4>
-                <div className="text-xs text-zinc-400 border-t border-zinc-850 pt-3 flex justify-between">
-                  <span>Modeler: <strong className="text-zinc-300 font-black">{task.assignedTo}</strong></span>
-                  <span>Lvl: <strong className="text-zinc-300 font-mono">{task.level}</strong></span>
+                <div className="text-xs text-zinc-400 border-t border-zinc-850 pt-3 flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-zinc-300">{task.assignedTo}</span>
+                    <span className="text-zinc-300 font-mono">{task.level}</span>
+                  </div>
                   <button
-  onClick={() => unarchiveTaskLocally(task.id)}
-  className="mt-3 w-full bg-zinc-800 hover:bg-yellow-700 text-zinc-400 hover:text-white text-xs font-bold py-1.5 rounded border border-zinc-700 transition"
->
-  ↩ Restore from Archive
-</button>
+                    onClick={() => restoreTask(task)}
+                    className="w-full bg-zinc-800 hover:bg-yellow-700 text-zinc-400 hover:text-white text-xs font-bold py-1.5 rounded border border-zinc-700 transition"
+                  >
+                    ↩ Restore from Archive
+                  </button>
                 </div>
               </div>
             ))}
