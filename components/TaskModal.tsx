@@ -66,17 +66,12 @@ export default function TaskModal({
   const [textureChecks, setTextureChecks] = useState<boolean[]>(Array(2).fill(false));
   const [exportChecks, setExportChecks] = useState<boolean[]>(Array(3).fill(false));
 
-const handleSaveTextData = () => {
-  console.log("Tombol diklik!"); // Cek apakah tombol benar-benar terhubung
-  console.log("Current Notes:", generalNotes);
-  console.log("Current Link:", gdriveLink);
-  
+const [sharedSyncMessage, setSharedSyncMessage] = useState<string>("");
+
+const handleSaveTextData = async () => {
   try {
     const key = `task_data_${task.id}`;
-    const existingData = JSON.parse(localStorage.getItem(key) || "{}");
-    
     const updatedData = {
-      ...existingData,
       geometryChecks,
       objectChecks,
       textureChecks,
@@ -93,14 +88,149 @@ const handleSaveTextData = () => {
       textureImages,
       exportImages,
     };
-    
+
     localStorage.setItem(key, JSON.stringify(updatedData));
-    console.log("Data berhasil disimpan ke:", key);
-    alert("Data berhasil disimpan!"); 
+    setSharedSyncMessage("Syncing shared data...");
+
+    const result = await saveSharedTaskData(updatedData);
+    if (result) {
+      setSharedSyncMessage("Shared data synced.");
+    } else {
+      setSharedSyncMessage("Shared sync failed. Data is stored locally.");
+    }
+
+    alert("Data berhasil disimpan!");
   } catch (error) {
     console.error("Gagal menyimpan data:", error);
+    setSharedSyncMessage("Shared sync failed.");
     alert("Terjadi kesalahan saat menyimpan!");
   }
+};
+
+const saveSharedTaskData = async (taskData: Record<string, any>) => {
+  try {
+    const response = await fetch("/api/route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "saveTaskData",
+        taskId: task.id,
+        data: taskData,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Shared save failed: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json();
+    if (result.error) {
+      throw new Error(result.error);
+    }
+
+    return result;
+  } catch (error: any) {
+    console.warn("Shared save failed:", error?.message || error);
+    return null;
+  }
+};
+
+const loadSharedTaskData = async () => {
+  try {
+    const response = await fetch(
+      `/api/route?taskId=${encodeURIComponent(task.id)}&action=loadTaskData`,
+      {
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      console.warn("Shared load failed:", response.status);
+      return null;
+    }
+
+    const result = await response.json();
+    if (result.error) {
+      console.warn("Shared load error:", result.error);
+      return null;
+    }
+
+    return result.data ?? result;
+  } catch (error: any) {
+    console.warn("Shared load failed:", error?.message || error);
+    return null;
+  }
+};
+
+const applySavedTaskData = (savedData: any) => {
+  if (!savedData || typeof savedData !== "object") {
+    return;
+  }
+
+  setGeneralNotes(savedData.notes ?? "");
+  setGdriveLink(savedData.gdrive ?? "");
+  setGeometryChecks(
+    Array.isArray(savedData.geometryChecks) && savedData.geometryChecks.length === 8
+      ? savedData.geometryChecks
+      : Array(8).fill(false)
+  );
+  setObjectChecks(
+    Array.isArray(savedData.objectChecks) && savedData.objectChecks.length === 3
+      ? savedData.objectChecks
+      : Array(3).fill(false)
+  );
+  setTextureChecks(
+    Array.isArray(savedData.textureChecks) && savedData.textureChecks.length === 2
+      ? savedData.textureChecks
+      : Array(2).fill(false)
+  );
+  setExportChecks(
+    Array.isArray(savedData.exportChecks) && savedData.exportChecks.length === 3
+      ? savedData.exportChecks
+      : Array(3).fill(false)
+  );
+  setGeometryNotes(
+    Array.isArray(savedData.geometryNotes) && savedData.geometryNotes.length === 8
+      ? savedData.geometryNotes.map(String)
+      : Array(8).fill("")
+  );
+  setObjectNotes(
+    Array.isArray(savedData.objectNotes) && savedData.objectNotes.length === 3
+      ? savedData.objectNotes.map(String)
+      : Array(3).fill("")
+  );
+  setTextureNotes(
+    Array.isArray(savedData.textureNotes) && savedData.textureNotes.length === 2
+      ? savedData.textureNotes.map(String)
+      : Array(2).fill("")
+  );
+  setExportNotes(
+    Array.isArray(savedData.exportNotes) && savedData.exportNotes.length === 3
+      ? savedData.exportNotes.map(String)
+      : Array(3).fill("")
+  );
+  setGeometryImages(
+    Array.isArray(savedData.geometryImages) && savedData.geometryImages.length === 8
+      ? savedData.geometryImages.map(String)
+      : Array(8).fill("")
+  );
+  setObjectImages(
+    Array.isArray(savedData.objectImages) && savedData.objectImages.length === 3
+      ? savedData.objectImages.map(String)
+      : Array(3).fill("")
+  );
+  setTextureImages(
+    Array.isArray(savedData.textureImages) && savedData.textureImages.length === 2
+      ? savedData.textureImages.map(String)
+      : Array(2).fill("")
+  );
+  setExportImages(
+    Array.isArray(savedData.exportImages) && savedData.exportImages.length === 3
+      ? savedData.exportImages.map(String)
+      : Array(3).fill("")
+  );
+  setReferenceImage(savedData.referenceImage ?? "");
 };
 
   //
@@ -133,98 +263,21 @@ useEffect(() => {
   setIsLoaded(false);
 
   const savedData = JSON.parse(localStorage.getItem(`task_data_${task.id}`) || "{}");
-
-  if (savedData.notes !== undefined) {
-    setGeneralNotes(String(savedData.notes));
-  } else {
-    setGeneralNotes("");
-  }
-
-  if (savedData.gdrive !== undefined) {
-    setGdriveLink(String(savedData.gdrive));
-  } else {
-    setGdriveLink("");
-  }
-
-  if (Array.isArray(savedData.geometryChecks) && savedData.geometryChecks.length === 8) {
-    setGeometryChecks(savedData.geometryChecks);
-  } else {
-    setGeometryChecks(Array(8).fill(false));
-  }
-
-  if (Array.isArray(savedData.objectChecks) && savedData.objectChecks.length === 3) {
-    setObjectChecks(savedData.objectChecks);
-  } else {
-    setObjectChecks(Array(3).fill(false));
-  }
-
-  if (Array.isArray(savedData.textureChecks) && savedData.textureChecks.length === 2) {
-    setTextureChecks(savedData.textureChecks);
-  } else {
-    setTextureChecks(Array(2).fill(false));
-  }
-
-  if (Array.isArray(savedData.exportChecks) && savedData.exportChecks.length === 3) {
-    setExportChecks(savedData.exportChecks);
-  } else {
-    setExportChecks(Array(3).fill(false));
-  }
-
-  if (Array.isArray(savedData.geometryNotes) && savedData.geometryNotes.length === 8) {
-    setGeometryNotes(savedData.geometryNotes.map(String));
-  } else {
-    setGeometryNotes(Array(8).fill(""));
-  }
-
-  if (Array.isArray(savedData.objectNotes) && savedData.objectNotes.length === 3) {
-    setObjectNotes(savedData.objectNotes.map(String));
-  } else {
-    setObjectNotes(Array(3).fill(""));
-  }
-
-  if (Array.isArray(savedData.textureNotes) && savedData.textureNotes.length === 2) {
-    setTextureNotes(savedData.textureNotes.map(String));
-  } else {
-    setTextureNotes(Array(2).fill(""));
-  }
-
-  if (Array.isArray(savedData.exportNotes) && savedData.exportNotes.length === 3) {
-    setExportNotes(savedData.exportNotes.map(String));
-  } else {
-    setExportNotes(Array(3).fill(""));
-  }
-
-  if (Array.isArray(savedData.geometryImages) && savedData.geometryImages.length === 8) {
-    setGeometryImages(savedData.geometryImages.map(String));
-  } else {
-    setGeometryImages(Array(8).fill(""));
-  }
-
-  if (Array.isArray(savedData.objectImages) && savedData.objectImages.length === 3) {
-    setObjectImages(savedData.objectImages.map(String));
-  } else {
-    setObjectImages(Array(3).fill(""));
-  }
-
-  if (Array.isArray(savedData.textureImages) && savedData.textureImages.length === 2) {
-    setTextureImages(savedData.textureImages.map(String));
-  } else {
-    setTextureImages(Array(2).fill(""));
-  }
-
-  if (Array.isArray(savedData.exportImages) && savedData.exportImages.length === 3) {
-    setExportImages(savedData.exportImages.map(String));
-  } else {
-    setExportImages(Array(3).fill(""));
-  }
-
-  if (savedData.referenceImage !== undefined) {
-    setReferenceImage(String(savedData.referenceImage));
-  } else {
-    setReferenceImage("");
-  }
-
+  applySavedTaskData(savedData);
   setIsLoaded(true);
+
+  const loadRemote = async () => {
+    const remoteData = await loadSharedTaskData();
+    if (remoteData) {
+      applySavedTaskData(remoteData);
+      localStorage.setItem(`task_data_${task.id}`, JSON.stringify(remoteData));
+      setSharedSyncMessage("Loaded shared data from cloud.");
+    } else {
+      setSharedSyncMessage("Loaded local task data.");
+    }
+  };
+
+  loadRemote();
 }, [task.id]);
 
 useEffect(() => {
@@ -362,7 +415,12 @@ useEffect(() => {
   {/* Kolom General Notes */}
   <div>
     <div className="flex items-center justify-between mb-3 gap-4">
-      <h3 className="text-xl font-bold">General Notes</h3>
+      <div>
+        <h3 className="text-xl font-bold">General Notes</h3>
+        {sharedSyncMessage ? (
+          <div className="text-xs text-zinc-400 mt-1">{sharedSyncMessage}</div>
+        ) : null}
+      </div>
       <button
         onClick={handleSaveTextData}
         className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors"
@@ -470,7 +528,8 @@ useEffect(() => {
                       // Upload to Google Drive in background
                       uploadToDrive(file)
                         .then((result) => {
-                          if (result.success) {
+                          if (result.success && result.url) {
+                            setReferenceImage(result.url);
                             console.log("Reference image uploaded to Drive:", result.url);
                           } else {
                             console.warn("Drive upload failed:", result.error);
@@ -1025,7 +1084,8 @@ function ChecklistItem({
                           // Upload to Google Drive in background
                           uploadToDrive(file)
                             .then((result) => {
-                              if (result.success) {
+                              if (result.success && result.url) {
+                                onImageChange(result.url);
                                 console.log("Image uploaded to Drive:", result.url);
                               } else {
                                 console.warn("Drive upload failed:", result.error);
